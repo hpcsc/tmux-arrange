@@ -1,0 +1,29 @@
+version: '3'
+
+tasks:
+  build:
+    desc: Build the binary into bin/, stamped with the version in VERSION
+    cmds:
+      - go build -trimpath -ldflags "-s -w -X main.version=$(cat VERSION)" -o bin/tmux-arrange .
+
+  test:
+    desc: Run the tests against throwaway tmux servers
+    cmds:
+      - go test ./...
+
+  fmt:
+    desc: Format the Go source with gofmt
+    cmds:
+      - gofmt -w .
+
+  vet:
+    desc: Vet the package
+    cmds:
+      - go vet ./...
+
+  check:
+    desc: Build, vet, and run the tests (the full verification gate)
+    cmds:
+      - task: build
+      - task: vet
+      - task: test

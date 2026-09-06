@@ -1,0 +1,27 @@
+version: 2
+
+project_name: tmux-arrange
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    binary: tmux-arrange
+
+archives:
+  # scripts/install.sh builds this name from uname; keep the two in step.
+  - formats: [tar.gz]
+    name_template: tmux-arrange_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto

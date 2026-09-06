@@ -1,0 +1,5 @@
+/tmux-arrange
+bin/
+install.log
+.install.lock/
+dist/

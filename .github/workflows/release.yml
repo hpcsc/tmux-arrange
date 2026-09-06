@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: The tag and VERSION must agree
+        # A clone installs the binary named by VERSION, so a tag that says
+        # something else would leave every user's install asking for an asset
+        # that does not exist.
+        run: |
+          test "v$(cat VERSION)" = "$GITHUB_REF_NAME" \
+            || { echo "VERSION is $(cat VERSION) but the tag is $GITHUB_REF_NAME"; exit 1; }
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
