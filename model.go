@@ -388,7 +388,15 @@ func (m *model) browseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.askRename()
 	case "enter":
-		if err := m.tmux.switchTo(m.client, m.current()); err != nil {
+		r := m.current()
+		window, pane := "", ""
+		if r.window != nil {
+			window = r.window.id
+		}
+		if r.pane != nil {
+			pane = r.pane.id
+		}
+		if err := m.tmux.switchTo(m.client, r.session.id, window, pane); err != nil {
 			m.fail(err)
 			return m, nil
 		}

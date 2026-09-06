@@ -69,6 +69,12 @@ func tmuxPath() string {
 	return "tmux"
 }
 
+// paneName is a pane's title, but only where tmux will hold on to it: with
+// allow-set-title on (1), whatever runs in the pane overwrites the title at its
+// next prompt, and the shells that do would fill the tree with names nobody
+// chose. An untouched title is the hostname.
+const paneName = "#{?#{==:#{allow-set-title},0},#{?#{==:#{pane_title},#{host}},,#{pane_title}},}"
+
 var treeFormat = strings.Join([]string{
 	"#{session_id}",
 	"#{session_name}",
@@ -81,11 +87,7 @@ var treeFormat = strings.Join([]string{
 	"#{pane_index}",
 	"#{?pane_active,1,0}",
 	"#{pane_current_command}",
-	// A pane's name is its title, but only where tmux will hold on to it:
-	// with allow-set-title on (1), whatever runs in the pane overwrites the
-	// title at its next prompt, and the shells that do would fill the tree
-	// with names nobody chose. An untouched title is the hostname.
-	"#{?#{==:#{allow-set-title},0},#{?#{==:#{pane_title},#{host}},,#{pane_title}},}",
+	paneName,
 	"#{pane_current_path}",
 }, "\t")
 
@@ -201,21 +203,21 @@ func (t tmux) namePane(id, name string) error {
 	return err
 }
 
-func (t tmux) switchTo(client string, r row) error {
+func (t tmux) switchTo(client, session, window, pane string) error {
 	args := []string{"switch-client"}
 	if client != "" {
 		args = append(args, "-c", client)
 	}
-	if _, err := t.run(append(args, "-t", r.session.id)...); err != nil {
+	if _, err := t.run(append(args, "-t", session)...); err != nil {
 		return err
 	}
-	if r.window != nil {
-		if _, err := t.run("select-window", "-t", r.window.id); err != nil {
+	if window != "" {
+		if _, err := t.run("select-window", "-t", window); err != nil {
 			return err
 		}
 	}
-	if r.pane != nil {
-		if _, err := t.run("select-pane", "-t", r.pane.id); err != nil {
+	if pane != "" {
+		if _, err := t.run("select-pane", "-t", pane); err != nil {
 			return err
 		}
 	}
