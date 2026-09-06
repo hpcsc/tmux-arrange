@@ -148,7 +148,7 @@ func (m *model) header() string {
 	right, style := "", markStyle
 	if len(m.clip) > 0 {
 		right, style = "✂ "+describe(m.clip)+" cut", cutStyle
-	} else if n := len(m.marked); n > 0 {
+	} else if n := len(m.marks()); n > 0 {
 		right = fmt.Sprintf("✓ %d marked", n)
 	}
 	return headerStyle.Render(fit(left, m.width)) + m.gap(left, right) + style.Render(right)
@@ -322,9 +322,9 @@ func keyHelp(here string) string {
 		"  j k        move the cursor        x      cut the window, pane or whole session",
 		"  h l        fold, unfold           p P    paste after, before the cursor",
 		"  J K        move it up, down       S      move what is cut into a new session",
-		"  g G        first, last            M      merge the session under the cursor into " + here,
-		"  space      mark for cutting       r      rename the window, pane or session",
-		"  enter      go there and close     d      close it, once y confirms",
-		"  q esc      quit; esc drops the marks first",
+		"  g G        first, last            r      rename the window, pane or session",
+		"  space      mark a row or session  d      close it, once y confirms",
+		"  enter      go there and close     q esc  quit; esc drops the marks first",
+		"  M          merge the marked sessions, or the one under the cursor, into " + here,
 	}, "\n")
 }

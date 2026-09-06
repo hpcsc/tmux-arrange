@@ -126,11 +126,12 @@ func (m *model) reload(focus string) {
 	m.focus(focus)
 }
 
-// forgetGone drops marks and cuts for windows and panes tmux no longer has, so
-// that closing something does not leave a clipboard tmux will refuse to paste.
+// forgetGone drops marks and cuts for anything tmux no longer has, so that
+// closing something does not leave a clipboard tmux will refuse to paste.
 func (m *model) forgetGone() {
 	live := map[string]bool{}
 	for _, sess := range m.sessions {
+		live[sess.id] = true
 		for _, w := range sess.windows {
 			live[w.id] = true
 			for _, p := range w.panes {
@@ -217,14 +218,38 @@ func (m *model) hereName() string {
 	return m.here
 }
 
+// marks lists the marked rows, each once. A row another mark already takes with
+// it is left out — a window or pane inside a marked session, a pane inside a
+// marked window — and a window linked into two sessions is marked in both.
+func (m *model) marks() []row {
+	var rows []row
+	seen := map[string]bool{}
+	for _, r := range m.rows {
+		if !r.marked || seen[r.id()] {
+			continue
+		}
+		if r.kind != sessionRow && m.marked[r.session.id] {
+			continue
+		}
+		if r.kind == paneRow && m.marked[r.window.id] {
+			continue
+		}
+		seen[r.id()] = true
+		rows = append(rows, r)
+	}
+	return rows
+}
+
 // selection is what an action works on: every marked row, or the row under the
 // cursor when nothing is marked. A session stands for all of its windows.
 func (m *model) selection() []item {
 	var items []item
-	for _, r := range m.rows {
-		if r.marked {
-			items = append(items, itemsOf(r)...)
+	for _, r := range m.marks() {
+		if r.kind == sessionRow {
+			items = append(items, m.itemsOfSession(r.session.id)...)
+			continue
 		}
+		items = append(items, itemsOf(r)...)
 	}
 	if len(items) > 0 {
 		return items
@@ -414,12 +439,7 @@ func (m *model) close() {
 }
 
 func (m *model) mark() {
-	r := m.current()
-	if r.kind == sessionRow {
-		m.hint("mark windows and panes; a session moves whole with x or M")
-		return
-	}
-	id := r.id()
+	id := m.current().id()
 	if m.marked[id] {
 		delete(m.marked, id)
 	} else {
@@ -518,32 +538,60 @@ func (m *model) neighbour(r row, down bool) string {
 	return ""
 }
 
+// mergeable is what M folds into here: every marked session, or the one under
+// the cursor when none is marked, and never here itself.
+func (m *model) mergeable() []*session {
+	var sessions []*session
+	marked := false
+	for _, r := range m.marks() {
+		if r.kind != sessionRow {
+			continue
+		}
+		marked = true
+		if r.session.id != m.here {
+			sessions = append(sessions, r.session)
+		}
+	}
+	if marked {
+		return sessions
+	}
+	if r := m.current(); r.session.id != m.here {
+		return []*session{r.session}
+	}
+	return nil
+}
+
 func (m *model) merge() {
-	r := m.current()
-	if r.session.id == m.here {
-		m.hint("%s is the session you came from", r.session.name)
+	sessions := m.mergeable()
+	if len(sessions) == 0 {
+		m.hint("%s is the session you came from", m.hereName())
 		return
 	}
-	sess := r.session
-	count := len(sess.windows)
-	if err := m.tmux.apply(appendCommands(m.itemsOfSession(sess.id), m.here)); err != nil {
+	var items []item
+	windows, what := 0, sessions[0].name
+	for _, sess := range sessions {
+		items = append(items, m.itemsOfSession(sess.id)...)
+		windows += len(sess.windows)
+	}
+	if len(sessions) > 1 {
+		what = plural(len(sessions), "session")
+	}
+	if err := m.tmux.apply(appendCommands(items, m.here)); err != nil {
 		m.fail(err)
 		return
 	}
-	name := sess.name
+	m.marked = map[string]bool{}
 	m.reload(m.here)
-	m.done("merged %d windows of %s into %s", count, name, m.hereName())
+	m.done("merged %s of %s into %s", plural(windows, "window"), what, m.hereName())
 }
 
 // closing is what d acts on: every marked row, or the row under the cursor when
 // nothing is marked. A session stands for itself here rather than for its
-// windows, and a pane inside a marked window is left out — the window takes it.
+// windows, which tmux closes with it.
 func (m *model) closing() []item {
 	var items []item
-	for _, r := range m.rows {
-		if r.marked && !(r.kind == paneRow && m.marked[r.window.id]) {
-			items = append(items, item{kind: r.kind, id: r.id(), label: r.label()})
-		}
+	for _, r := range m.marks() {
+		items = append(items, item{kind: r.kind, id: r.id(), label: r.label()})
 	}
 	if len(items) > 0 {
 		return items
@@ -553,11 +601,14 @@ func (m *model) closing() []item {
 }
 
 func (m *model) askClose() {
-	if r := m.current(); len(m.marked) == 0 && r.kind == sessionRow && r.session.id == m.here {
-		m.hint("%s is the session you came from", r.session.name)
-		return
+	items := m.closing()
+	for _, it := range items {
+		if it.kind == sessionRow && it.id == m.here {
+			m.hint("%s is the session you came from", m.hereName())
+			return
+		}
 	}
-	m.doomed = m.closing()
+	m.doomed = items
 	m.mode = confirming
 	m.clear()
 }
@@ -682,22 +733,31 @@ func describe(items []item) string {
 	if len(items) == 1 {
 		return items[0].label
 	}
-	windows, panes := 0, 0
+	sessions, windows, panes := 0, 0, 0
 	for _, it := range items {
-		if it.kind == paneRow {
+		switch it.kind {
+		case sessionRow:
+			sessions++
+		case paneRow:
 			panes++
-		} else {
+		default:
 			windows++
 		}
 	}
 	var parts []string
+	if sessions > 0 {
+		parts = append(parts, plural(sessions, "session"))
+	}
 	if windows > 0 {
 		parts = append(parts, plural(windows, "window"))
 	}
 	if panes > 0 {
 		parts = append(parts, plural(panes, "pane"))
 	}
-	return strings.Join(parts, " and ")
+	if len(parts) < 3 {
+		return strings.Join(parts, " and ")
+	}
+	return parts[0] + ", " + parts[1] + " and " + parts[2]
 }
 
 func plural(n int, word string) string {

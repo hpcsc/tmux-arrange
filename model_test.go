@@ -140,6 +140,32 @@ func TestModel(t *testing.T) {
 			require.Equal(t, []string{"notes:0 read", "notes:1 one", "notes:2 two", "work:0 edit"}, windows(t, tm))
 		})
 
+		t.Run("a marked session is cut with all of its windows", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read", "write"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ", "x")
+			atSession(t, m, tm, "work")
+			press(m, "p")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 read", "work:2 write"}, windows(t, tm))
+		})
+
+		t.Run("a window marked inside a marked session moves only once", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read", "write"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			at(t, m, windowID(t, tm, "notes", "read"))
+			press(m, " ", "x")
+			atSession(t, m, tm, "work")
+			press(m, "p")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 read", "work:2 write"}, windows(t, tm))
+		})
+
 		t.Run("a whole session cut with x lands where it is pasted", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"}, []string{"notes", "read", "write"})
 			m := openOn(t, tm, "work")
@@ -337,6 +363,33 @@ func TestModel(t *testing.T) {
 			out, err := tm.run("list-sessions", "-F", "#{session_name}")
 			require.NoError(t, err)
 			require.Equal(t, []string{"work"}, lines(out))
+		})
+
+		t.Run("folds in every marked session, not only the one at the cursor", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"}, []string{"docs", "write"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "docs")
+			press(m, " ")
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			press(m, "M")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 write", "work:2 read"}, windows(t, tm))
+			require.Equal(t, "merged 2 windows of 2 sessions into work", m.status)
+		})
+
+		t.Run("leaves out the session it would merge into", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			atSession(t, m, tm, "work")
+			press(m, " ", "M")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 read"}, windows(t, tm))
+			require.Equal(t, "merged 1 window of notes into work", m.status)
 		})
 
 		t.Run("merging the current session into itself is refused", func(t *testing.T) {
@@ -594,6 +647,62 @@ func TestModel(t *testing.T) {
 			require.Equal(t, "closed notes", m.status)
 		})
 
+		t.Run("closes every marked session", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"}, []string{"docs", "write"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "docs")
+			press(m, " ")
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+			require.Equal(t, "closed 2 sessions", m.status)
+		})
+
+		t.Run("a window marked inside a marked session is not closed twice", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read", "write"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			at(t, m, windowID(t, tm, "notes", "read"))
+			press(m, " ")
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+			require.Equal(t, toneDone, m.tone)
+		})
+
+		t.Run("names a mixed selection by what is in it", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"}, []string{"notes", "read"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, " ")
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+			require.Equal(t, "closed 1 session and 1 window", m.status)
+		})
+
+		t.Run("refuses a marked session the popup was opened from", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			atSession(t, m, tm, "work")
+			press(m, " ", "d")
+
+			require.Equal(t, browsing, m.mode)
+			require.Contains(t, m.status, "the session you came from")
+			require.Equal(t, []string{"notes:0 read", "work:0 edit"}, windows(t, tm))
+		})
+
 		t.Run("refuses the session the popup was opened from", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"})
 			m := openOn(t, tm, "work")
@@ -712,15 +821,28 @@ func TestModel(t *testing.T) {
 			require.Empty(t, m.clip)
 		})
 
-		t.Run("a session cannot be marked", func(t *testing.T) {
-			tm := server(t, []string{"work", "edit"})
+		t.Run("a mark covered by another does not count twice", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read", "write"})
 			m := openOn(t, tm, "work")
 
-			atSession(t, m, tm, "work")
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+			at(t, m, windowID(t, tm, "notes", "read"))
 			press(m, " ")
 
-			require.Empty(t, m.marked)
-			require.Contains(t, m.status, "mark windows and panes")
+			require.Len(t, m.marks(), 1)
+			require.Contains(t, m.header(), "1 marked")
+		})
+
+		t.Run("a session can be marked like any other row", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"})
+			m := openOn(t, tm, "work")
+			notes := sessionID(t, tm, "notes")
+
+			atSession(t, m, tm, "notes")
+			press(m, " ")
+
+			require.Equal(t, map[string]bool{notes: true}, m.marked)
 		})
 	})
 

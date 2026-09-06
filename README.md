@@ -25,17 +25,23 @@ at the place instead.
 |---|---|
 | `j` `k` `g` `G` | move the cursor |
 | `h` `l` | fold and unfold — `l` on a window shows its panes |
-| `space` | mark a row, to act on several at once |
+| `space` | mark a row — a session, window or pane — to act on several at once |
 | `x` | cut the window or pane under the cursor; on a session name, all of its windows |
 | `p` `P` | paste after, or before, the cursor. On a session name it lands at that session's end |
 | `J` `K` | move a window within its session, or swap a pane with its neighbour |
-| `M` | merge the session under the cursor into the one the popup was opened from |
+| `M` | merge the marked sessions, or the one under the cursor, into the one the popup was opened from |
 | `S` | move what is cut into a new session, named as you type it |
 | `r` | rename the window or session; on a pane it sets a title, which an empty name takes away |
 | `d` | close the pane, window or session under the cursor, once `y` confirms |
 | `enter` | go to the row under the cursor and close |
 | `q` `esc` | close; `esc` drops the marks first |
 | `?` | the full key list |
+
+`space` marks a row and `x`, `d`, `S` and `M` then act on everything marked
+instead of on the cursor. Sessions can be marked too, so several go into one
+session with `x` and `p`, fold into the one you came from with `M`, or close
+together with `d`. A window or pane marked inside a marked session is left out
+of the count: the session already takes it.
 
 Panes take part in all of it: cut a pane and paste it onto a window to join it
 there as a split, onto a particular pane to split that one, or onto a session
@@ -47,8 +53,8 @@ title back. A title a program set for itself is not a name, and stays out of the
 tree, so a shell that titles every prompt does not clutter it.
 
 `d` closes things, and asks first: it names what is about to go and waits for
-`y`. Mark several rows with `space` and one `d` closes them all. The session the
-popup was opened from is the one thing it will not close.
+`y`. The session the popup was opened from is the one thing it will not close,
+marked or not.
 
 ## Install
 
