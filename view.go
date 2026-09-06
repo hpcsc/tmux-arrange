@@ -88,7 +88,7 @@ func fit(s string, width int) string {
 
 func (m *model) chromeHeight() int {
 	if m.help {
-		return 12
+		return 13
 	}
 	return 6
 }
@@ -247,14 +247,22 @@ func (m *model) cells(r row) ([]cell, string) {
 		if last := r.window.panes[len(r.window.panes)-1]; last.id == r.pane.id {
 			branch = " └"
 		}
-		return []cell{
+		name := commandStyle
+		if r.pane.title != "" {
+			name = nameStyle
+		}
+		cells := []cell{
 			{"│ ", guideStyle},
 			{branch, guideStyle},
 			{" ", plainStyle},
 			{fmt.Sprintf("%-2d", r.pane.index), indexStyle},
 			{" ", plainStyle},
-			{r.pane.command, textStyle(r, commandStyle)},
-		}, shortPath(r.pane.path)
+			{r.label(), textStyle(r, name)},
+		}
+		if r.pane.title != "" {
+			cells = append(cells, cell{"  " + r.pane.command, detailStyle})
+		}
+		return cells, shortPath(r.pane.path)
 	}
 }
 
@@ -280,6 +288,10 @@ func textStyle(r row, style lipgloss.Style) lipgloss.Style {
 }
 
 func (m *model) footer() string {
+	if m.mode == confirming {
+		return sessionStyle.Render("close "+describe(m.doomed)+"?") + "\n" +
+			helpStyle.Render("y  close    any other key  keep it")
+	}
 	if m.mode != browsing {
 		prompt := "new session name"
 		if m.mode == renaming {
@@ -303,15 +315,16 @@ func (m *model) footer() string {
 	return status + "\n" + helpStyle.Render(fit(shortHelp, m.width))
 }
 
-const shortHelp = "j k move   x cut   p P paste   J K reorder   M merge   S new session   enter go   ? keys"
+const shortHelp = "j k move   x cut   d close   r rename   p P paste   J K reorder   enter go   ? keys"
 
 func keyHelp(here string) string {
 	return strings.Join([]string{
 		"  j k        move the cursor        x      cut the window, pane or whole session",
 		"  h l        fold, unfold           p P    paste after, before the cursor",
 		"  J K        move it up, down       S      move what is cut into a new session",
-		"  space      mark for cutting       M      merge the session under the cursor into " + here,
-		"  enter      go there and close     r      rename the window or session",
-		"  g G        first, last            q esc  close; esc drops the marks first",
+		"  g G        first, last            M      merge the session under the cursor into " + here,
+		"  space      mark for cutting       r      rename the window, pane or session",
+		"  enter      go there and close     d      close it, once y confirms",
+		"  q esc      quit; esc drops the marks first",
 	}, "\n")
 }

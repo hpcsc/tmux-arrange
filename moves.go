@@ -37,6 +37,9 @@ func (r row) label() string {
 	case windowRow:
 		return r.window.name
 	case paneRow:
+		if r.pane.title != "" {
+			return r.pane.title
+		}
 		return r.pane.command
 	}
 	return r.session.name
@@ -101,6 +104,23 @@ func pasteOne(it item, dst row, before bool) []string {
 		cmd = append(cmd, "-b")
 	}
 	return append(cmd, "-s", it.id, "-t", paneTarget)
+}
+
+// killCommands closes every item, each by the id of the thing itself: a session
+// goes with its windows, a window with its panes.
+func killCommands(items []item) [][]string {
+	var cmds [][]string
+	for _, it := range items {
+		verb := "kill-window"
+		switch it.kind {
+		case sessionRow:
+			verb = "kill-session"
+		case paneRow:
+			verb = "kill-pane"
+		}
+		cmds = append(cmds, []string{verb, "-t", it.id})
+	}
+	return cmds
 }
 
 // appendCommands puts every item at the end of the session, a window as a

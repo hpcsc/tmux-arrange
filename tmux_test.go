@@ -135,6 +135,55 @@ func TestTmux(t *testing.T) {
 			require.NotEmpty(t, w.panes[0].path)
 		})
 
+		t.Run("reads the name a pane has been given", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			tree, err := tm.tree()
+			require.NoError(t, err)
+			require.NoError(t, tm.namePane(tree[0].windows[0].panes[0].id, "logs"))
+
+			tree, err = tm.tree()
+			require.NoError(t, err)
+
+			require.Equal(t, "logs", tree[0].windows[0].panes[0].title)
+		})
+
+		t.Run("a title the pane's own program can overwrite is no name", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("select-pane", "-t", "=work:edit", "-T", "passing through")
+			require.NoError(t, err)
+
+			tree, err := tm.tree()
+			require.NoError(t, err)
+
+			require.Empty(t, tree[0].windows[0].panes[0].title)
+		})
+
+		t.Run("a pane nobody has named has no name", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+
+			tree, err := tm.tree()
+			require.NoError(t, err)
+
+			require.Empty(t, tree[0].windows[0].panes[0].title)
+		})
+
+		t.Run("clearing a name hands the title back to the pane", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			tree, err := tm.tree()
+			require.NoError(t, err)
+			id := tree[0].windows[0].panes[0].id
+			require.NoError(t, tm.namePane(id, "logs"))
+
+			require.NoError(t, tm.namePane(id, ""))
+
+			tree, err = tm.tree()
+			require.NoError(t, err)
+			require.Empty(t, tree[0].windows[0].panes[0].title)
+			out, err := tm.run("show-options", "-p", "-t", id, "allow-set-title")
+			require.NoError(t, err)
+			require.Empty(t, out)
+		})
+
 		t.Run("a window linked into two sessions shows under both", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"})
 			_, err := tm.run("link-window", "-d", "-s", "=work:edit", "-t", "=notes:")

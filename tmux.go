@@ -15,6 +15,7 @@ type pane struct {
 	index   int
 	active  bool
 	command string
+	title   string
 	path    string
 }
 
@@ -80,6 +81,11 @@ var treeFormat = strings.Join([]string{
 	"#{pane_index}",
 	"#{?pane_active,1,0}",
 	"#{pane_current_command}",
+	// A pane's name is its title, but only where tmux will hold on to it:
+	// with allow-set-title on (1), whatever runs in the pane overwrites the
+	// title at its next prompt, and the shells that do would fill the tree
+	// with names nobody chose. An untouched title is the hostname.
+	"#{?#{==:#{allow-set-title},0},#{?#{==:#{pane_title},#{host}},,#{pane_title}},}",
 	"#{pane_current_path}",
 }, "\t")
 
@@ -97,7 +103,7 @@ func parseTree(out string) []session {
 	windowAt := map[string]int{}
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) < 12 {
+		if len(f) < 13 {
 			continue
 		}
 		s, seen := sessionAt[f[0]]
@@ -126,7 +132,8 @@ func parseTree(out string) []session {
 			index:   atoi(f[8]),
 			active:  f[9] == "1",
 			command: f[10],
-			path:    f[11],
+			title:   f[11],
+			path:    f[12],
 		})
 	}
 	sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].name < sessions[j].name })
@@ -178,6 +185,20 @@ func (t tmux) apply(commands [][]string) error {
 		}
 	}
 	return nil
+}
+
+// namePane titles the pane and stops programs in it from titling it themselves,
+// so the name stays until it is cleared, which hands the title back to them.
+func (t tmux) namePane(id, name string) error {
+	if _, err := t.run("select-pane", "-t", id, "-T", name); err != nil {
+		return err
+	}
+	args := []string{"set-option", "-p", "-t", id, "allow-set-title", "off"}
+	if name == "" {
+		args = []string{"set-option", "-p", "-t", id, "-u", "allow-set-title"}
+	}
+	_, err := t.run(args...)
+	return err
 }
 
 func (t tmux) switchTo(client string, r row) error {

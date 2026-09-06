@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,8 @@ func key(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case " ":
 		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 	}
@@ -58,6 +61,32 @@ func paneIDs(t *testing.T, tm tmux, session, name string) []string {
 	out, err := tm.run("list-panes", "-t", "="+session+":"+name, "-F", "#{pane_id}")
 	require.NoError(t, err)
 	return lines(out)
+}
+
+func paneTitle(t *testing.T, tm tmux, id string) string {
+	t.Helper()
+	out, err := tm.run("display-message", "-p", "-t", id, "#{pane_title}")
+	require.NoError(t, err)
+	return strings.TrimSpace(out)
+}
+
+// paneHolds says whether tmux is keeping the pane's title against whatever runs
+// in it, which is what makes a name a name.
+func paneHolds(t *testing.T, tm tmux, id string) bool {
+	t.Helper()
+	out, err := tm.run("show-options", "-p", "-t", id, "allow-set-title")
+	require.NoError(t, err)
+	return strings.TrimSpace(out) == "allow-set-title off"
+}
+
+// openPanes unfolds the window and puts the cursor on the pane at that index.
+func openPanes(t *testing.T, m *model, tm tmux, session, window string, pane int) string {
+	t.Helper()
+	at(t, m, windowID(t, tm, session, window))
+	press(m, "l")
+	id := paneIDs(t, tm, session, window)[pane]
+	at(t, m, id)
+	return id
 }
 
 func TestModel(t *testing.T) {
@@ -402,19 +431,212 @@ func TestModel(t *testing.T) {
 			require.Equal(t, "work2", m.current().session.name)
 		})
 
-		t.Run("a pane has no name of its own", func(t *testing.T) {
+		t.Run("gives the pane under the cursor a title of its own", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
 			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
 			require.NoError(t, err)
 			m := openOn(t, tm, "work")
+			first := openPanes(t, m, tm, "work", "edit", 0)
 
-			at(t, m, windowID(t, tm, "work", "edit"))
-			press(m, "l")
-			at(t, m, paneIDs(t, tm, "work", "edit")[0])
 			press(m, "r")
+			typeIn(m, "logs")
+			press(m, "enter")
+
+			require.Equal(t, "logs", paneTitle(t, tm, first))
+			require.Equal(t, "logs", m.current().label())
+		})
+
+		t.Run("the name outlasts the program in the pane", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			first := openPanes(t, m, tm, "work", "edit", 0)
+
+			press(m, "r")
+			typeIn(m, "logs")
+			press(m, "enter")
+
+			require.True(t, paneHolds(t, tm, first))
+		})
+
+		t.Run("offers the title the pane already has", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			first := openPanes(t, m, tm, "work", "edit", 0)
+			require.NoError(t, tm.namePane(first, "logs"))
+			m.reload(first)
+
+			press(m, "r")
+			typeIn(m, "-old")
+			press(m, "enter")
+
+			require.Equal(t, "logs-old", paneTitle(t, tm, first))
+		})
+
+		t.Run("an empty name hands the pane back to what runs in it", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			first := openPanes(t, m, tm, "work", "edit", 0)
+			require.NoError(t, tm.namePane(first, "logs"))
+			m.reload(first)
+
+			press(m, "r", "backspace", "backspace", "backspace", "backspace")
+			press(m, "enter")
+
+			require.Empty(t, paneTitle(t, tm, first))
+			require.False(t, paneHolds(t, tm, first))
+			require.Equal(t, m.current().pane.command, m.current().label())
+			require.NotEmpty(t, m.current().pane.command)
+		})
+
+		t.Run("an empty name leaves a window as it was", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "r", "backspace", "backspace", "backspace")
+			press(m, "enter")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 run"}, windows(t, tm))
+		})
+	})
+
+	t.Run("close", func(t *testing.T) {
+		t.Run("closes the window under the cursor once y confirms", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run", "logs"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit", "work:2 logs"}, windows(t, tm))
+			require.Equal(t, "closed run", m.status)
+		})
+
+		t.Run("waits for the answer before closing anything", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "d")
+
+			require.Equal(t, confirming, m.mode)
+			require.Equal(t, []string{"work:0 edit", "work:1 run"}, windows(t, tm))
+		})
+
+		t.Run("any answer other than y keeps it", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "d", "n")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 run"}, windows(t, tm))
+			require.Equal(t, browsing, m.mode)
+			require.Contains(t, m.status, "nothing closed")
+		})
+
+		t.Run("closes a pane and leaves the rest of its window", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			before := paneIDs(t, tm, "work", "edit")
+			openPanes(t, m, tm, "work", "edit", 0)
+
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+			require.Equal(t, before[1:], paneIDs(t, tm, "work", "edit"))
+		})
+
+		t.Run("closes every marked row at once", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run", "logs"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, " ", " ")
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+			require.Equal(t, "closed 2 windows", m.status)
+		})
+
+		t.Run("a marked pane inside a marked window goes with the window", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			openPanes(t, m, tm, "work", "edit", 0)
+			press(m, " ")
+			at(t, m, windowID(t, tm, "work", "edit"))
+			press(m, " ")
+
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:1 run"}, windows(t, tm))
+			require.Equal(t, toneDone, m.tone)
+		})
+
+		t.Run("closes a whole session", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read", "write"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "notes")
+			press(m, "d", "y")
+
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+			require.Equal(t, "closed notes", m.status)
+		})
+
+		t.Run("refuses the session the popup was opened from", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"}, []string{"notes", "read"})
+			m := openOn(t, tm, "work")
+
+			atSession(t, m, tm, "work")
+			press(m, "d")
 
 			require.Equal(t, browsing, m.mode)
-			require.Contains(t, m.status, "panes take their name")
+			require.Contains(t, m.status, "the session you came from")
+			require.Equal(t, []string{"notes:0 read", "work:0 edit"}, windows(t, tm))
+		})
+
+		t.Run("what was cut and then closed is no longer cut", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "x", "d", "y")
+
+			require.Empty(t, m.clip)
+			require.Equal(t, []string{"work:0 edit"}, windows(t, tm))
+		})
+
+		t.Run("the cursor lands on the row below the one that is gone", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run", "logs"})
+			m := openOn(t, tm, "work")
+			logs := windowID(t, tm, "work", "logs")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "d", "y")
+
+			require.Equal(t, logs, m.current().id())
+		})
+
+		t.Run("closing the last row leaves the cursor on the one above", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+			edit := windowID(t, tm, "work", "edit")
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "d", "y")
+
+			require.Equal(t, edit, m.current().id())
 		})
 	})
 

@@ -14,6 +14,7 @@ const (
 	browsing mode = iota
 	renaming
 	namingSession
+	confirming
 )
 
 // tone tells the footer whether the status line reports something that
@@ -39,6 +40,7 @@ type model struct {
 	height    int
 	marked    map[string]bool
 	clip      []item
+	doomed    []item
 	collapsed map[string]bool
 	expanded  map[string]bool
 	status    string
@@ -119,8 +121,35 @@ func (m *model) reload(focus string) {
 		return
 	}
 	m.sessions = sessions
+	m.forgetGone()
 	m.rebuild()
 	m.focus(focus)
+}
+
+// forgetGone drops marks and cuts for windows and panes tmux no longer has, so
+// that closing something does not leave a clipboard tmux will refuse to paste.
+func (m *model) forgetGone() {
+	live := map[string]bool{}
+	for _, sess := range m.sessions {
+		for _, w := range sess.windows {
+			live[w.id] = true
+			for _, p := range w.panes {
+				live[p.id] = true
+			}
+		}
+	}
+	var clip []item
+	for _, it := range m.clip {
+		if live[it.id] {
+			clip = append(clip, it)
+		}
+	}
+	m.clip = clip
+	for id := range m.marked {
+		if !live[id] {
+			delete(m.marked, id)
+		}
+	}
 }
 
 func (m *model) focus(id string) {
@@ -211,7 +240,7 @@ func itemsOf(r row) []item {
 	case windowRow:
 		return []item{{kind: windowRow, id: r.window.id, label: r.window.name}}
 	case paneRow:
-		return []item{{kind: paneRow, id: r.pane.id, label: r.pane.command}}
+		return []item{{kind: paneRow, id: r.pane.id, label: r.label()}}
 	}
 	return nil
 }
@@ -234,10 +263,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tea.KeyMsg:
-		if m.mode != browsing {
-			return m.editKey(msg)
+		switch m.mode {
+		case browsing:
+			return m.browseKey(msg)
+		case confirming:
+			return m.confirmKey(msg)
 		}
-		return m.browseKey(msg)
+		return m.editKey(msg)
 	}
 	return m, nil
 }
@@ -252,19 +284,31 @@ func (m *model) editKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		name := strings.TrimSpace(m.input.Value())
 		mode := m.mode
 		m.mode = browsing
-		if name == "" {
+		if mode == namingSession {
+			if name != "" {
+				m.moveToNewSession(name)
+			}
 			return m, nil
 		}
-		if mode == namingSession {
-			m.moveToNewSession(name)
-		} else {
-			m.rename(name)
-		}
+		m.rename(name)
 		return m, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// confirmKey answers the close prompt. Only y goes through with it, so a key
+// pressed at the wrong moment never kills a window.
+func (m *model) confirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	items := m.doomed
+	m.mode, m.doomed = browsing, nil
+	if key := msg.String(); key != "y" && key != "Y" {
+		m.hint("nothing closed")
+		return m, nil
+	}
+	m.kill(items)
+	return m, nil
 }
 
 func (m *model) browseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -302,6 +346,8 @@ func (m *model) browseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mark()
 	case "x":
 		m.cut()
+	case "d":
+		m.askClose()
 	case "p":
 		m.paste(false)
 	case "P":
@@ -489,6 +535,71 @@ func (m *model) merge() {
 	m.done("merged %d windows of %s into %s", count, name, m.hereName())
 }
 
+// closing is what d acts on: every marked row, or the row under the cursor when
+// nothing is marked. A session stands for itself here rather than for its
+// windows, and a pane inside a marked window is left out — the window takes it.
+func (m *model) closing() []item {
+	var items []item
+	for _, r := range m.rows {
+		if r.marked && !(r.kind == paneRow && m.marked[r.window.id]) {
+			items = append(items, item{kind: r.kind, id: r.id(), label: r.label()})
+		}
+	}
+	if len(items) > 0 {
+		return items
+	}
+	r := m.current()
+	return []item{{kind: r.kind, id: r.id(), label: r.label()}}
+}
+
+func (m *model) askClose() {
+	if r := m.current(); len(m.marked) == 0 && r.kind == sessionRow && r.session.id == m.here {
+		m.hint("%s is the session you came from", r.session.name)
+		return
+	}
+	m.doomed = m.closing()
+	m.mode = confirming
+	m.clear()
+}
+
+func (m *model) kill(items []item) {
+	focus := m.survivor(items)
+	if err := m.tmux.apply(killCommands(items)); err != nil {
+		m.fail(err)
+		m.reload(focus)
+		return
+	}
+	m.marked = map[string]bool{}
+	m.reload(focus)
+	m.done("closed %s", describe(items))
+}
+
+// survivor names the row to leave the cursor on once these are gone: the first
+// row below it that outlives them, or else the nearest one above.
+func (m *model) survivor(items []item) string {
+	dead := map[string]bool{}
+	for _, it := range items {
+		dead[it.id] = true
+	}
+	lives := func(r row) bool {
+		if dead[r.id()] || dead[r.session.id] {
+			return false
+		}
+		return r.window == nil || !dead[r.window.id]
+	}
+	for i := m.cursor + 1; i < len(m.rows); i++ {
+		if lives(m.rows[i]) {
+			return m.rows[i].id()
+		}
+	}
+	for i := m.cursor - 1; i >= 0; i-- {
+		if lives(m.rows[i]) {
+			return m.rows[i].id()
+		}
+	}
+	return ""
+}
+
 func (m *model) askNewSession() {
 	if len(m.clip) == 0 {
 		m.clip = m.selection()
@@ -517,30 +628,42 @@ func (m *model) moveToNewSession(name string) {
 
 func (m *model) askRename() {
 	r := m.current()
+	name := r.label()
 	if r.kind == paneRow {
-		m.hint("panes take their name from what runs in them")
-		return
+		name = r.pane.title
 	}
 	m.mode = renaming
-	m.input.SetValue(r.label())
+	m.input.SetValue(name)
 	m.input.CursorEnd()
 	m.input.Focus()
 }
 
+// rename gives the row the typed name. A pane is named by its title, which an
+// empty name clears, leaving the pane to read as whatever runs in it; a session
+// or a window keeps the name it has rather than being left nameless.
 func (m *model) rename(name string) {
 	r := m.current()
-	target, err := r.session.id, error(nil)
-	if r.kind == sessionRow {
+	if name == "" && r.kind != paneRow {
+		return
+	}
+	target, err := r.id(), error(nil)
+	switch r.kind {
+	case sessionRow:
 		_, err = m.tmux.run("rename-session", "-t", r.session.id, name)
-	} else {
-		target = r.window.id
+	case windowRow:
 		_, err = m.tmux.run("rename-window", "-t", r.window.id, name)
+	default:
+		err = m.tmux.namePane(r.pane.id, name)
 	}
 	if err != nil {
 		m.fail(err)
 		return
 	}
 	m.reload(target)
+	if name == "" {
+		m.done("cleared the name of the pane")
+		return
+	}
 	m.done("renamed to %s", name)
 }
 

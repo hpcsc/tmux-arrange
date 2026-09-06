@@ -10,7 +10,7 @@ where it is, put the cursor where it belongs, paste it there.
     ▾ work ●                                            here · 2 windows
     │    0  edit ●                                            ~/dotfiles
 ▶ ✂ │ ▾2 1  server                                      ~/dotfiles/tools
-    │  ├ 0  zsh                                          ~/dotfiles/docs
+    │  ├ 0  logs  zsh                                    ~/dotfiles/docs
     │  └ 1  nvim                                        ~/dotfiles/tools
 ```
 
@@ -31,14 +31,24 @@ at the place instead.
 | `J` `K` | move a window within its session, or swap a pane with its neighbour |
 | `M` | merge the session under the cursor into the one the popup was opened from |
 | `S` | move what is cut into a new session, named as you type it |
-| `r` | rename the window or session |
+| `r` | rename the window or session; on a pane it sets a title, which an empty name takes away |
+| `d` | close the pane, window or session under the cursor, once `y` confirms |
 | `enter` | go to the row under the cursor and close |
 | `q` `esc` | close; `esc` drops the marks first |
 | `?` | the full key list |
 
 Panes take part in all of it: cut a pane and paste it onto a window to join it
 there as a split, onto a particular pane to split that one, or onto a session
-name to break it out into a window of its own.
+name to break it out into a window of its own. `r` on a pane gives it a name of
+its own — tmux calls it the pane title — which the tree shows in place of the
+command the pane runs, with the command kept beside it. The name sticks: tmux
+stops the program in that pane from retitling it, until an empty name hands the
+title back. A title a program set for itself is not a name, and stays out of the
+tree, so a shell that titles every prompt does not clutter it.
+
+`d` closes things, and asks first: it names what is about to go and waits for
+`y`. Mark several rows with `space` and one `d` closes them all. The session the
+popup was opened from is the one thing it will not close.
 
 ## Install
 
@@ -82,9 +92,10 @@ has to be told which client to switch when you press `enter`, because a popup's
 own tty tells tmux nothing about the client that opened it.
 
 Everything the tool does is a tmux command — `move-window`, `join-pane`,
-`break-pane`, `swap-window`, `swap-pane`. Sessions, windows and panes are named
-to tmux by id (`$1`, `@4`, `%9`), never by name, so a rename between reading the
-tree and moving something cannot misdirect it.
+`break-pane`, `swap-window`, `swap-pane`, `kill-window`, `kill-pane`,
+`kill-session`. Sessions, windows and panes are named to tmux by id (`$1`, `@4`,
+`%9`), never by name, so a rename between reading the tree and moving something
+cannot misdirect it.
 
 ## Development
 
