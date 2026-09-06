@@ -127,6 +127,7 @@ type layout struct {
 	undo    []undoStep
 	preset  int
 	sizing  bool
+	placing bool
 	before  string
 }
 
@@ -240,6 +241,9 @@ func (m *model) layoutKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.layout.sizing {
 		return m.sizeKey(msg)
 	}
+	if m.layout.placing {
+		return m.placeKey(msg)
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -261,6 +265,10 @@ func (m *model) layoutKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.push(northward)
 	case "L":
 		m.push(eastward)
+	case "x":
+		m.cutPane()
+	case "p":
+		m.askPlace()
 	case "s":
 		m.startSizing()
 	case "=":
@@ -277,6 +285,88 @@ func (m *model) layoutKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// placeKey takes the side of the pane under the cursor that what is cut lands
+// on. Anything but a direction backs out, leaving the clipboard as it was.
+func (m *model) placeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.layout.placing = false
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "h", "left":
+		m.place(westward)
+	case "j", "down":
+		m.place(southward)
+	case "k", "up":
+		m.place(northward)
+	case "l", "right":
+		m.place(eastward)
+	default:
+		m.clear()
+	}
+	return m, nil
+}
+
+// cutPane takes the pane under the cursor, or puts it back when it is the one
+// already cut, into the same clipboard the tree cuts into.
+func (m *model) cutPane() {
+	b := m.layout.at()
+	if len(m.clip) == 1 && m.clip[0].id == b.id {
+		m.clip = nil
+		m.clear()
+		return
+	}
+	m.clip = []item{{kind: paneRow, id: b.id, label: b.label()}}
+	m.done("cut %s — p puts it beside the pane you point at", b.label())
+}
+
+func (m *model) askPlace() {
+	if len(m.clip) == 0 {
+		m.hint("nothing cut — x cuts the pane under the cursor")
+		return
+	}
+	for _, it := range m.clip {
+		if it.kind != paneRow {
+			m.hint("a window goes beside a window: paste it in the tree")
+			return
+		}
+	}
+	if m.stillZoomed() {
+		return
+	}
+	m.layout.placing = true
+	m.clear()
+}
+
+// place splits the pane under the cursor and puts what is cut in the half on
+// that side, wherever in the tree it was cut from.
+func (m *model) place(s side) {
+	l := m.layout
+	dst := l.at()
+	var cmds [][]string
+	for _, it := range m.clip {
+		if it.id == dst.id {
+			m.hint("already there")
+			return
+		}
+		cmd := []string{"join-pane", "-d", "-v"}
+		if s.dx != 0 {
+			cmd = []string{"join-pane", "-d", "-h"}
+		}
+		if s.dx < 0 || s.dy < 0 {
+			cmd = append(cmd, "-b")
+		}
+		cmds = append(cmds, append(cmd, "-s", it.id, "-t", dst.id))
+	}
+	placed, beside, first := describe(m.clip), dst.label(), m.clip[0].id
+	if err := m.tmux.apply(cmds); err != nil {
+		m.fail(err)
+		return
+	}
+	m.clip = nil
+	m.layoutReload(first)
+	m.done("put %s beside %s", placed, beside)
 }
 
 // sizeKey nudges the pane's borders until esc leaves, so that the keys that
@@ -467,6 +557,7 @@ const (
 	tintName
 	tintDetail
 	tintLive
+	tintCut
 )
 
 func (t tint) style() lipgloss.Style {
@@ -481,6 +572,8 @@ func (t tint) style() lipgloss.Style {
 		return detailStyle
 	case tintLive:
 		return activeStyle
+	case tintCut:
+		return cutStyle.Italic(true)
 	}
 	return plainStyle
 }
@@ -622,9 +715,18 @@ func (m *model) drawBox(c *canvas, b box, scale float64, picked bool) {
 	if picked {
 		edge, name = tintPick, tintPick
 	}
+	cut := false
+	for _, it := range m.clip {
+		if it.id == b.id {
+			cut, name = true, tintCut
+		}
+	}
 	c.frame(x0, y0, x1, y1, edge)
 	inner := x1 - x0 - 1
 	label := fmt.Sprintf("%d  %s", b.index, b.label())
+	if cut {
+		label = "✂ " + label
+	}
 	if picked {
 		label = "▶ " + label
 	}
@@ -664,12 +766,16 @@ func (m *model) layoutHeader() string {
 	if l.shape.zoomed {
 		right = "zoomed · " + right
 	}
+	if len(m.clip) > 0 {
+		right = "✂ " + describe(m.clip) + " cut · " + right
+	}
 	return sessionStyle.Render(fit(l.name, m.width)) + m.gap(l.name, right) + headerStyle.Render(right)
 }
 
 const (
-	layoutHelp = "hjkl point   HJKL push   s size   = layout   z zoom   u undo   enter go   esc back"
+	layoutHelp = "hjkl point   HJKL push   x cut   p place   s size   = layout   z zoom   u undo   esc back"
 	sizeHelp   = "h j k l  nudge the border that way   H J K L  by five   esc  done"
+	placeHelp  = "h j k l  the side it goes on   any other key  keep it where it is"
 )
 
 func (m *model) layoutFooter() string {
@@ -686,6 +792,10 @@ func (m *model) layoutFooter() string {
 	if m.layout.sizing {
 		help = sizeHelp
 		status = sessionStyle.Render(fit("resizing "+m.layout.at().label(), m.width))
+	}
+	if m.layout.placing {
+		help = placeHelp
+		status = sessionStyle.Render(fit("which side of "+m.layout.at().label()+"?", m.width))
 	}
 	return status + "\n" + helpStyle.Render(fit(help, m.width))
 }

@@ -79,6 +79,8 @@ you point at them:
 |---|---|
 | `h` `j` `k` `l` | point at the pane on that side |
 | `H` `J` `K` `L` | push the pane that way, swapping it with the one there |
+| `x` | cut the pane under the cursor; `x` again puts it back |
+| `p` | place what is cut beside that pane — `h` `j` `k` `l` says which side |
 | `s` | resize: `h` `j` `k` `l` nudge the border, `H` `J` `K` `L` by five, `esc` when done |
 | `=` | step through the preset layouts — even, main, tiled |
 | `z` | zoom the pane, and unzoom it |
@@ -91,6 +93,12 @@ Which pane is beside which comes from the rectangles tmux reports, so `h` and
 number. Resizing is the border you push: `l` moves the pane's right edge right,
 whatever side of the window it is on. A whole run of nudges undoes in one `u`,
 so it is worth nudging freely.
+
+The clipboard is the same one the tree cuts into, which is how a pane crosses
+windows and lands where you want it: cut it here or in the tree, open the other
+window's map, then `p` and the side it belongs on. `u` puts back changes to this
+window's own layout — a size, a push, a preset — rather than a pane that came
+from somewhere else.
 
 ## Install
 

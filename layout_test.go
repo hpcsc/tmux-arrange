@@ -36,6 +36,17 @@ func openLayoutOn(t *testing.T, tm tmux, session, window string) *model {
 	return m
 }
 
+func boxOf(t *testing.T, m *model, id string) box {
+	t.Helper()
+	for _, b := range m.layout.shape.boxes {
+		if b.id == id {
+			return b
+		}
+	}
+	t.Fatalf("no pane %s in the map", id)
+	return box{}
+}
+
 func TestLayout(t *testing.T) {
 	t.Run("neighbour", func(t *testing.T) {
 		t.Run("finds the pane across each side", func(t *testing.T) {
@@ -320,6 +331,117 @@ func TestLayout(t *testing.T) {
 
 			require.Equal(t, before, paneIDs(t, tm, "work", "edit"))
 			require.Contains(t, m.status, "zoomed")
+		})
+	})
+
+	t.Run("cut and place", func(t *testing.T) {
+		t.Run("x cuts the pane and p puts it on the side pointed at", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			_, err = tm.run("split-window", "-d", "-v", "-t", "=work:edit.1")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			panes := paneIDs(t, tm, "work", "edit")
+			m.layout.focus(panes[2])
+
+			press(m, "x")
+			m.layout.focus(panes[0])
+			press(m, "p", "k")
+
+			above := m.layout.at()
+			require.Equal(t, panes[2], above.id)
+			require.Less(t, above.top, boxOf(t, m, panes[0]).top)
+		})
+
+		t.Run("the clipboard carries from the tree into the map", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+			edit := paneIDs(t, tm, "work", "edit")[0]
+
+			at(t, m, windowID(t, tm, "work", "edit"))
+			press(m, "l")
+			at(t, m, edit)
+			press(m, "x")
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "L", "p", "l")
+
+			require.Equal(t, []string{"work:1 run"}, windows(t, tm))
+			require.Len(t, paneIDs(t, tm, "work", "run"), 2)
+			require.Empty(t, m.clip)
+		})
+
+		t.Run("x again puts back the pane it cut", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "x", "x")
+
+			require.Empty(t, m.clip)
+		})
+
+		t.Run("placing where it already is changes nothing", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			before := paneIDs(t, tm, "work", "edit")
+
+			press(m, "x", "p", "l")
+
+			require.Equal(t, before, paneIDs(t, tm, "work", "edit"))
+			require.Contains(t, m.status, "already there")
+		})
+
+		t.Run("any other key leaves what is cut where it is", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			before := paneIDs(t, tm, "work", "edit")
+
+			press(m, "x", "p", "esc")
+
+			require.Equal(t, before, paneIDs(t, tm, "work", "edit"))
+			require.Len(t, m.clip, 1)
+			require.NotNil(t, m.layout)
+		})
+
+		t.Run("p with nothing cut says so", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "p")
+
+			require.Contains(t, m.status, "nothing cut")
+		})
+
+		t.Run("a window cut in the tree cannot be placed beside a pane", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "edit"))
+			press(m, "x")
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "L", "p")
+
+			require.Contains(t, m.status, "paste it in the tree")
+			require.False(t, m.layout.placing)
+		})
+
+		t.Run("the map shows what is cut", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "x")
+
+			require.Contains(t, m.View(), "✂ ")
 		})
 	})
 
