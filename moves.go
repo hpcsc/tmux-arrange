@@ -151,6 +151,9 @@ func (t tmux) newSession(name string, clip []item) error {
 		return fmt.Errorf("tmux did not name the new session: %q", out)
 	}
 	if err := t.apply(appendCommands(clip, made[0])); err != nil {
+		// Half a session is worse than none: it holds the name the user asked
+		// for and a window they never wanted.
+		t.run("kill-session", "-t", made[0])
 		return err
 	}
 	_, err = t.run("kill-window", "-t", made[1])

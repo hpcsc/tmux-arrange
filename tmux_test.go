@@ -245,6 +245,17 @@ func TestTmux(t *testing.T) {
 			require.Contains(t, panes(t, tm)[0], second.id)
 		})
 
+		t.Run("a move that fails takes the half-made session with it", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+
+			err := tm.newSession("side", []item{{kind: windowRow, id: "@404"}})
+
+			require.Error(t, err)
+			out, err := tm.run("list-sessions", "-F", "#{session_name}")
+			require.NoError(t, err)
+			require.Equal(t, []string{"work"}, lines(out))
+		})
+
 		t.Run("a name already taken is reported", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
 
