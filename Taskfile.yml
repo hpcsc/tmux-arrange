@@ -27,3 +27,39 @@ tasks:
       - task: build
       - task: vet
       - task: test
+
+  release:
+    desc: 'Set VERSION, check, commit and tag it: task release -- 0.2.0'
+    vars:
+      V: '{{ .CLI_ARGS | default .VERSION }}'
+      BRANCH:
+        sh: git rev-parse --abbrev-ref HEAD
+    preconditions:
+      - sh: '[ -n "{{.V}}" ]'
+        msg: 'name the version: task release -- 0.2.0'
+      - sh: 'printf %s "{{.V}}" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
+        msg: '{{.V}} is not a x.y.z version'
+      # VERSION is excluded so that a run which failed after writing it can
+      # simply be run again; this task rewrites and commits it either way.
+      - sh: '[ -z "$(git status --porcelain -- . '':!VERSION'')" ]'
+        msg: 'commit or stash first — the tag has to name a tree that is already committed'
+      - sh: '! git rev-parse -q --verify refs/tags/v{{.V}} > /dev/null'
+        msg: 'v{{.V}} is already tagged'
+    cmds:
+      - task: check
+      - echo "{{.V}}" > VERSION
+      - git add VERSION
+      # Nothing staged means VERSION already named this version, and the tag
+      # belongs on the commit that set it rather than on an empty one.
+      - git diff --cached --quiet || git commit -m "Release v{{.V}}"
+      # An annotated tag: goreleaser dates the release from it, and the release
+      # workflow refuses a tag that does not match VERSION.
+      - git tag -a "v{{.V}}" -m "v{{.V}}"
+      - cmd: |
+          echo
+          echo "committed and tagged v{{.V}}. Push it with:"
+          echo
+          echo "    git push origin {{.BRANCH}} v{{.V}}"
+          echo
+          echo "The release workflow builds the assets that installs of the plugin download."
+        silent: true

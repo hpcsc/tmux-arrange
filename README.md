@@ -95,6 +95,14 @@ task check   # build, vet, and the tests
 The tests drive a real tmux: each one starts a throwaway server on a socket of
 its own, presses keys at the model, and asserts on the layout tmux reports back.
 
-Releasing is a tag: bump `VERSION`, tag `v<that>`, and the release workflow
-builds the assets with goreleaser. The tag and `VERSION` have to agree — a
-clone asks for the asset `VERSION` names.
+Releasing is one task:
+
+```sh
+task release -- 0.2.0
+```
+
+It runs the checks, writes `VERSION`, commits it, annotates the tag, and prints
+the `git push` line to run — pushing the tag is what starts the release
+workflow, which builds the assets with goreleaser. The tag and `VERSION` have
+to agree, because every clone asks for the asset `VERSION` names; the workflow
+refuses a tag that says otherwise.
