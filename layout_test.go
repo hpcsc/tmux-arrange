@@ -188,6 +188,139 @@ func TestLayout(t *testing.T) {
 			require.Equal(t, 1, m.layout.cursor)
 		})
 
+		t.Run("u puts the pane back where it was", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			before := paneIDs(t, tm, "work", "edit")
+			m.layout.focus(before[0])
+
+			press(m, "L", "u")
+
+			require.Equal(t, before, paneIDs(t, tm, "work", "edit"))
+			require.Equal(t, "undid the move", m.status)
+		})
+	})
+
+	t.Run("size", func(t *testing.T) {
+		t.Run("s then l moves the border right", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			m.layout.focus(paneIDs(t, tm, "work", "edit")[0])
+			before := m.layout.at().width()
+
+			press(m, "s", "l", "l")
+
+			require.Equal(t, before+2, m.layout.at().width())
+			require.True(t, m.layout.sizing)
+		})
+
+		t.Run("esc leaves sizing without leaving the map", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "s", "l", "esc")
+
+			require.False(t, m.layout.sizing)
+			require.NotNil(t, m.layout)
+		})
+
+		t.Run("u puts a whole run of nudges back in one step", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			m.layout.focus(paneIDs(t, tm, "work", "edit")[0])
+			before := m.layout.at().width()
+
+			press(m, "s", "l", "l", "l", "esc", "u")
+
+			require.Equal(t, before, m.layout.at().width())
+			require.Equal(t, "undid the resize", m.status)
+		})
+
+		t.Run("a run that changed nothing leaves nothing to undo", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "s", "esc", "u")
+
+			require.Contains(t, m.status, "nothing to undo")
+		})
+	})
+
+	t.Run("presets", func(t *testing.T) {
+		t.Run("= lays the panes out evenly across the window", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			splitInto(t, tm, "=work:edit", 2)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "=")
+
+			require.Equal(t, "even-horizontal", m.status)
+			for _, b := range m.layout.shape.boxes {
+				require.Equal(t, m.layout.shape.height, b.height())
+			}
+		})
+
+		t.Run("= steps on to the next layout each time", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			splitInto(t, tm, "=work:edit", 2)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "=", "=")
+
+			require.Equal(t, "even-vertical", m.status)
+			for _, b := range m.layout.shape.boxes {
+				require.Equal(t, m.layout.shape.width, b.width())
+			}
+		})
+
+		t.Run("u goes back to the layout that was there", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			splitInto(t, tm, "=work:edit", 2)
+			m := openLayoutOn(t, tm, "work", "edit")
+			before := m.layout.at().width()
+
+			press(m, "=", "u")
+
+			require.Equal(t, before, m.layout.at().width())
+		})
+	})
+
+	t.Run("zoom", func(t *testing.T) {
+		t.Run("z gives the pane the whole window, and gives it back", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+
+			press(m, "z")
+			require.True(t, m.layout.shape.zoomed)
+
+			press(m, "z")
+			require.False(t, m.layout.shape.zoomed)
+		})
+
+		t.Run("a zoomed window refuses the keys that would rearrange it", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-h", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openLayoutOn(t, tm, "work", "edit")
+			before := paneIDs(t, tm, "work", "edit")
+
+			press(m, "z", "H")
+
+			require.Equal(t, before, paneIDs(t, tm, "work", "edit"))
+			require.Contains(t, m.status, "zoomed")
+		})
 	})
 
 	t.Run("the map", func(t *testing.T) {

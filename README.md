@@ -79,12 +79,18 @@ you point at them:
 |---|---|
 | `h` `j` `k` `l` | point at the pane on that side |
 | `H` `J` `K` `L` | push the pane that way, swapping it with the one there |
+| `s` | resize: `h` `j` `k` `l` nudge the border, `H` `J` `K` `L` by five, `esc` when done |
+| `=` | step through the preset layouts — even, main, tiled |
+| `z` | zoom the pane, and unzoom it |
+| `u` | undo the last change |
 | `enter` | go to that pane and close |
 | `esc` | back to the tree |
 
 Which pane is beside which comes from the rectangles tmux reports, so `h` and
 `l` cross to the pane that is really there rather than to the next one by
-number.
+number. Resizing is the border you push: `l` moves the pane's right edge right,
+whatever side of the window it is on. A whole run of nudges undoes in one `u`,
+so it is worth nudging freely.
 
 ## Install
 
@@ -129,9 +135,14 @@ own tty tells tmux nothing about the client that opened it.
 
 Everything the tool does is a tmux command — `move-window`, `join-pane`,
 `break-pane`, `swap-window`, `swap-pane`, `kill-window`, `kill-pane`,
-`kill-session`. Sessions, windows and panes are named to tmux by id (`$1`, `@4`,
-`%9`), never by name, so a rename between reading the tree and moving something
-cannot misdirect it.
+`kill-session`, `resize-pane`, `select-layout`. Sessions, windows and panes are
+named to tmux by id (`$1`, `@4`, `%9`), never by name, so a rename between
+reading the tree and moving something cannot misdirect it.
+
+Undo in the layout view is tmux's own doing: `#{window_layout}` writes a
+window's geometry down as a string that `select-layout` takes back, so a resize
+or a preset undoes exactly. A push undoes as the opposite push, since a layout
+string carries sizes rather than which pane sits where.
 
 ## Development
 

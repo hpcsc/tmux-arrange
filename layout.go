@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -87,6 +88,14 @@ func parseShape(out string) shape {
 	return s
 }
 
+// layoutOf is the window's geometry as tmux writes it down. select-layout takes
+// the string back and restores the sizes, but not which pane sits where, so a
+// pushed pane is put back by pushing it the other way instead.
+func (t tmux) layoutOf(window string) (string, error) {
+	out, err := t.run("display-message", "-p", "-t", window, "#{window_layout}")
+	return strings.TrimSpace(out), err
+}
+
 // side is a direction to point, push or resize in: the flag resize-pane knows
 // it by, and the step it takes across the window.
 type side struct {
@@ -102,6 +111,12 @@ var (
 	southward = side{"-D", 0, 1}
 )
 
+// undoStep is what puts one change back, and what to call it when it is undone.
+type undoStep struct {
+	what string
+	cmds [][]string
+}
+
 // layout is the view of one window's panes as boxes to point at.
 type layout struct {
 	session string
@@ -109,6 +124,10 @@ type layout struct {
 	name    string
 	shape   shape
 	cursor  int
+	undo    []undoStep
+	preset  int
+	sizing  bool
+	before  string
 }
 
 func (l *layout) at() box { return l.shape.boxes[l.cursor] }
@@ -132,6 +151,10 @@ func (l *layout) focusActive() {
 			return
 		}
 	}
+}
+
+func (l *layout) remember(what string, cmds [][]string) {
+	l.undo = append(l.undo, undoStep{what: what, cmds: cmds})
 }
 
 // neighbour is the pane next to the cursor's on that side: the nearest one
@@ -214,6 +237,9 @@ func (m *model) layoutReload(focus string) {
 }
 
 func (m *model) layoutKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.layout.sizing {
+		return m.sizeKey(msg)
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -235,12 +261,48 @@ func (m *model) layoutKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.push(northward)
 	case "L":
 		m.push(eastward)
+	case "s":
+		m.startSizing()
+	case "=":
+		m.nextPreset()
+	case "z":
+		m.zoom()
+	case "u":
+		m.undoLayout()
 	case "enter":
 		if err := m.tmux.switchTo(m.client, m.layout.session, m.layout.window, m.layout.at().id); err != nil {
 			m.fail(err)
 			return m, nil
 		}
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// sizeKey nudges the pane's borders until esc leaves, so that the keys that
+// point at a pane are the ones that resize it.
+func (m *model) sizeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "q", "s", "enter":
+		m.stopSizing()
+	case "h", "left":
+		m.resize(westward, 1)
+	case "j", "down":
+		m.resize(southward, 1)
+	case "k", "up":
+		m.resize(northward, 1)
+	case "l", "right":
+		m.resize(eastward, 1)
+	case "H":
+		m.resize(westward, 5)
+	case "J":
+		m.resize(southward, 5)
+	case "K":
+		m.resize(northward, 5)
+	case "L":
+		m.resize(eastward, 5)
 	}
 	return m, nil
 }
@@ -270,8 +332,92 @@ func (m *model) push(s side) {
 		m.fail(err)
 		return
 	}
+	l.remember("the move", [][]string{{"swap-pane", "-d", "-s", moved, "-t", swapped}})
 	m.layoutReload(moved)
 	m.clear()
+}
+
+func (m *model) startSizing() {
+	if m.stillZoomed() {
+		return
+	}
+	before, err := m.tmux.layoutOf(m.layout.window)
+	if err != nil {
+		m.fail(err)
+		return
+	}
+	m.layout.sizing, m.layout.before = true, before
+	m.clear()
+}
+
+// stopSizing folds a whole run of nudges into one undo step, so that u puts the
+// pane back the size it was before the run rather than one nudge back.
+func (m *model) stopSizing() {
+	l := m.layout
+	l.sizing = false
+	now, err := m.tmux.layoutOf(l.window)
+	if err == nil && now != l.before {
+		l.remember("the resize", [][]string{{"select-layout", "-t", l.window, l.before}})
+	}
+	m.clear()
+}
+
+func (m *model) resize(s side, step int) {
+	l := m.layout
+	if _, err := m.tmux.run("resize-pane", "-t", l.at().id, s.flag, strconv.Itoa(step)); err != nil {
+		m.fail(err)
+		return
+	}
+	m.layoutReload(l.at().id)
+}
+
+var presets = []string{"even-horizontal", "even-vertical", "main-horizontal", "main-vertical", "tiled"}
+
+func (m *model) nextPreset() {
+	l := m.layout
+	if m.stillZoomed() {
+		return
+	}
+	before, err := m.tmux.layoutOf(l.window)
+	if err != nil {
+		m.fail(err)
+		return
+	}
+	name := presets[l.preset%len(presets)]
+	l.preset++
+	if _, err := m.tmux.run("select-layout", "-t", l.window, name); err != nil {
+		m.fail(err)
+		return
+	}
+	l.remember("the layout", [][]string{{"select-layout", "-t", l.window, before}})
+	m.layoutReload(l.at().id)
+	m.done("%s", name)
+}
+
+func (m *model) zoom() {
+	l := m.layout
+	if _, err := m.tmux.run("resize-pane", "-Z", "-t", l.at().id); err != nil {
+		m.fail(err)
+		return
+	}
+	m.layoutReload(l.at().id)
+	m.clear()
+}
+
+func (m *model) undoLayout() {
+	l := m.layout
+	if len(l.undo) == 0 {
+		m.hint("nothing to undo")
+		return
+	}
+	step := l.undo[len(l.undo)-1]
+	l.undo = l.undo[:len(l.undo)-1]
+	if err := m.tmux.apply(step.cmds); err != nil {
+		m.fail(err)
+		return
+	}
+	m.layoutReload(l.at().id)
+	m.done("undid %s", step.what)
 }
 
 // stillZoomed reports the one state the layout view cannot work in: tmux gives
@@ -521,7 +667,10 @@ func (m *model) layoutHeader() string {
 	return sessionStyle.Render(fit(l.name, m.width)) + m.gap(l.name, right) + headerStyle.Render(right)
 }
 
-const layoutHelp = "h j k l  point at a pane   H J K L  push it that way   enter  go   esc  back"
+const (
+	layoutHelp = "hjkl point   HJKL push   s size   = layout   z zoom   u undo   enter go   esc back"
+	sizeHelp   = "h j k l  nudge the border that way   H J K L  by five   esc  done"
+)
 
 func (m *model) layoutFooter() string {
 	status := ""
@@ -533,5 +682,10 @@ func (m *model) layoutFooter() string {
 	case toneFail:
 		status = errorStyle.Render(fit("✗ "+m.status, m.width))
 	}
-	return status + "\n" + helpStyle.Render(fit(layoutHelp, m.width))
+	help := layoutHelp
+	if m.layout.sizing {
+		help = sizeHelp
+		status = sessionStyle.Render(fit("resizing "+m.layout.at().label(), m.width))
+	}
+	return status + "\n" + helpStyle.Render(fit(help, m.width))
 }
