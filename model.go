@@ -41,6 +41,7 @@ type model struct {
 	marked    map[string]bool
 	clip      []item
 	doomed    []item
+	layout    *layout
 	collapsed map[string]bool
 	expanded  map[string]bool
 	status    string
@@ -288,6 +289,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tea.KeyMsg:
+		if m.layout != nil {
+			return m.layoutKey(msg)
+		}
 		switch m.mode {
 		case browsing:
 			return m.browseKey(msg)
@@ -387,6 +391,8 @@ func (m *model) browseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.askNewSession()
 	case "r":
 		m.askRename()
+	case "L":
+		m.openLayout()
 	case "enter":
 		r := m.current()
 		window, pane := "", ""

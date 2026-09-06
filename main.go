@@ -3,7 +3,8 @@
 // paste it with p; J and K move it within its session; M merges the session
 // under the cursor into the one the popup was opened from; S sends what is cut
 // to a session of its own. r renames what the cursor is on and d closes it, once
-// y confirms. Enter goes to the row under the cursor.
+// y confirms. L draws the panes of a window as boxes to point at and push
+// around. Enter goes to the row under the cursor.
 //
 //	tmux-arrange --popup <client>   open the tree in a popup over that client
 //	tmux-arrange [client]           the tree itself, in the terminal it is run in

@@ -33,6 +33,7 @@ at the place instead.
 | `S` | move what is cut into a new session, named as you type it |
 | `r` | rename the window or session; on a pane it sets a title, which an empty name takes away |
 | `d` | close the pane, window or session under the cursor, once `y` confirms |
+| `L` | lay out the panes of the window under the cursor — see below |
 | `enter` | go to the row under the cursor and close |
 | `q` `esc` | close; `esc` drops the marks first |
 | `?` | the full key list |
@@ -55,6 +56,35 @@ tree, so a shell that titles every prompt does not clutter it.
 `d` closes things, and asks first: it names what is about to go and waits for
 `y`. The session the popup was opened from is the one thing it will not close,
 marked or not.
+
+## Laying out a window
+
+`L` on a window or pane draws that window's panes as boxes, to scale, and lets
+you point at them:
+
+```
+ work · edit                                          5 panes · 200x50
+
+ ┌───────────────────────┬──────────────────────┐
+ │▶ 0  nvim ●            │2  server             │
+ │100x25                 │99x25                 │
+ │                       │                      │
+ ├───────────────────────┼───────────┬──────────┤
+ │1  zsh                 │3  logs    │4  psql   │
+ │100x24                 │49x24      │49x24     │
+ └───────────────────────┴───────────┴──────────┘
+```
+
+| Key | Does |
+|---|---|
+| `h` `j` `k` `l` | point at the pane on that side |
+| `H` `J` `K` `L` | push the pane that way, swapping it with the one there |
+| `enter` | go to that pane and close |
+| `esc` | back to the tree |
+
+Which pane is beside which comes from the rectangles tmux reports, so `h` and
+`l` cross to the pane that is really there rather than to the next one by
+number.
 
 ## Install
 

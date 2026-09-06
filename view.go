@@ -87,7 +87,7 @@ func fit(s string, width int) string {
 }
 
 func (m *model) chromeHeight() int {
-	if m.help {
+	if m.help && m.layout == nil {
 		return 13
 	}
 	return 6
@@ -114,6 +114,9 @@ func (m *model) scroll(height int) {
 }
 
 func (m *model) View() string {
+	if m.layout != nil {
+		return m.layoutView()
+	}
 	if len(m.rows) == 0 {
 		return "no tmux sessions\n"
 	}
@@ -315,7 +318,7 @@ func (m *model) footer() string {
 	return status + "\n" + helpStyle.Render(fit(shortHelp, m.width))
 }
 
-const shortHelp = "j k move   x cut   d close   r rename   p P paste   J K reorder   enter go   ? keys"
+const shortHelp = "j k move   x cut   d close   r rename   L layout   p P paste   enter go   ? keys"
 
 func keyHelp(here string) string {
 	return strings.Join([]string{
@@ -324,7 +327,7 @@ func keyHelp(here string) string {
 		"  J K        move it up, down       S      move what is cut into a new session",
 		"  g G        first, last            r      rename the window, pane or session",
 		"  space      mark a row or session  d      close it, once y confirms",
-		"  enter      go there and close     q esc  quit; esc drops the marks first",
-		"  M          merge the marked sessions, or the one under the cursor, into " + here,
+		"  enter      go there and close     L      lay out the window's panes",
+		"  q esc      quit; esc drops marks  M      merge marked sessions into " + here,
 	}, "\n")
 }
