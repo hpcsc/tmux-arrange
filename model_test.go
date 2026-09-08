@@ -492,6 +492,7 @@ func TestModel(t *testing.T) {
 
 		t.Run("gives the pane under the cursor a title of its own", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
+			needsPaneNames(t, tm)
 			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
 			require.NoError(t, err)
 			m := openOn(t, tm, "work")
@@ -507,6 +508,7 @@ func TestModel(t *testing.T) {
 
 		t.Run("the name outlasts the program in the pane", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
+			needsPaneNames(t, tm)
 			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
 			require.NoError(t, err)
 			m := openOn(t, tm, "work")
@@ -521,6 +523,7 @@ func TestModel(t *testing.T) {
 
 		t.Run("offers the title the pane already has", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
+			needsPaneNames(t, tm)
 			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
 			require.NoError(t, err)
 			m := openOn(t, tm, "work")
@@ -537,6 +540,7 @@ func TestModel(t *testing.T) {
 
 		t.Run("an empty name hands the pane back to what runs in it", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
+			needsPaneNames(t, tm)
 			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
 			require.NoError(t, err)
 			m := openOn(t, tm, "work")
@@ -551,6 +555,33 @@ func TestModel(t *testing.T) {
 			require.False(t, paneHolds(t, tm, first))
 			require.Equal(t, m.current().pane.command, m.current().label())
 			require.NotEmpty(t, m.current().pane.command)
+		})
+
+		t.Run("a pane is left unnamed where tmux cannot hold the name", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			m.holdsTitles = false
+			openPanes(t, m, tm, "work", "edit", 0)
+
+			press(m, "r")
+
+			require.Equal(t, browsing, m.mode)
+			require.Contains(t, m.status, "tmux 3.5")
+		})
+
+		t.Run("a window is still renamed where a pane cannot be", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit", "run"})
+			m := openOn(t, tm, "work")
+			m.holdsTitles = false
+
+			at(t, m, windowID(t, tm, "work", "run"))
+			press(m, "r")
+			typeIn(m, "-two")
+			press(m, "enter")
+
+			require.Equal(t, []string{"work:0 edit", "work:1 run-two"}, windows(t, tm))
 		})
 
 		t.Run("an empty name leaves a window as it was", func(t *testing.T) {

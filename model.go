@@ -49,6 +49,8 @@ type model struct {
 	mode      mode
 	input     textinput.Model
 	help      bool
+	// holdsTitles is false on tmux older than 3.5, where a pane cannot be named.
+	holdsTitles bool
 }
 
 func newModel(t tmux, client string) (*model, error) {
@@ -56,15 +58,16 @@ func newModel(t tmux, client string) (*model, error) {
 	in.Prompt = ""
 	in.CharLimit = 60
 	m := &model{
-		tmux:      t,
-		client:    client,
-		here:      t.sessionOf(client),
-		marked:    map[string]bool{},
-		collapsed: map[string]bool{},
-		expanded:  map[string]bool{},
-		width:     80,
-		height:    24,
-		input:     in,
+		tmux:        t,
+		client:      client,
+		here:        t.sessionOf(client),
+		holdsTitles: t.holdsTitles(),
+		marked:      map[string]bool{},
+		collapsed:   map[string]bool{},
+		expanded:    map[string]bool{},
+		width:       80,
+		height:      24,
+		input:       in,
 	}
 	sessions, err := t.tree()
 	if err != nil {
@@ -693,6 +696,10 @@ func (m *model) moveToNewSession(name string) {
 
 func (m *model) askRename() {
 	r := m.current()
+	if r.kind == paneRow && !m.holdsTitles {
+		m.hint("naming a pane needs tmux 3.5")
+		return
+	}
 	name := r.label()
 	if r.kind == paneRow {
 		name = r.pane.title

@@ -72,7 +72,9 @@ func tmuxPath() string {
 // paneName is a pane's title, but only where tmux will hold on to it: with
 // allow-set-title on (1), whatever runs in the pane overwrites the title at its
 // next prompt, and the shells that do would fill the tree with names nobody
-// chose. An untouched title is the hostname.
+// chose. An untouched title is the hostname. Before tmux 3.5 there is no such
+// option and the test never holds, so no pane reads as named, which is the
+// whole of what the popup offers there.
 const paneName = "#{?#{==:#{allow-set-title},0},#{?#{==:#{pane_title},#{host}},,#{pane_title}},}"
 
 var treeFormat = strings.Join([]string{
@@ -187,6 +189,14 @@ func (t tmux) apply(commands [][]string) error {
 		}
 	}
 	return nil
+}
+
+// holdsTitles says whether this tmux can keep a pane's name against the program
+// running under it. allow-set-title arrived in 3.5; asked of an older one the
+// format comes back empty, as any name tmux does not know does.
+func (t tmux) holdsTitles() bool {
+	out, err := t.run("display-message", "-p", "#{?#{==:#{allow-set-title},},no,yes}")
+	return err == nil && strings.TrimSpace(out) == "yes"
 }
 
 // namePane titles the pane and stops programs in it from titling it themselves,

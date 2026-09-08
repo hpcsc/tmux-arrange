@@ -122,7 +122,10 @@ The version the binary was built at sits in the bottom-right corner of the
 popup, so an install or an update can be told apart from the one before it. A
 binary built by hand rather than from a release says `dev`.
 
-Requires tmux 3.2 or newer, for `display-popup`.
+Requires tmux 3.2 or newer, for `display-popup`. Naming a pane needs 3.5, for
+the `allow-set-title` option that holds the name against the program running
+under it: on anything older `r` on a pane says so and leaves it alone, panes
+read as the command they run, and everything else works as it does here.
 
 ## Options
 

@@ -11,6 +11,15 @@ import (
 
 // server starts a throwaway tmux server holding one session per name, each with
 // the given windows, and returns a client bound to it.
+// needsPaneNames skips a test that names a pane where tmux cannot hold the name.
+// allow-set-title arrived in 3.5, and Ubuntu still ships 3.4.
+func needsPaneNames(t *testing.T, tm tmux) {
+	t.Helper()
+	if !tm.holdsTitles() {
+		t.Skip("this tmux has no allow-set-title; naming a pane needs 3.5")
+	}
+}
+
 func server(t *testing.T, sessions ...[]string) tmux {
 	t.Helper()
 	t.Setenv("TMUX", "")
@@ -137,6 +146,7 @@ func TestTmux(t *testing.T) {
 
 		t.Run("reads the name a pane has been given", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
+			needsPaneNames(t, tm)
 			tree, err := tm.tree()
 			require.NoError(t, err)
 			require.NoError(t, tm.namePane(tree[0].windows[0].panes[0].id, "logs"))
@@ -169,6 +179,7 @@ func TestTmux(t *testing.T) {
 
 		t.Run("clearing a name hands the title back to the pane", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
+			needsPaneNames(t, tm)
 			tree, err := tm.tree()
 			require.NoError(t, err)
 			id := tree[0].windows[0].panes[0].id
