@@ -797,5 +797,5 @@ func (m *model) layoutFooter() string {
 		help = placeHelp
 		status = sessionStyle.Render(fit("which side of "+m.layout.at().label()+"?", m.width))
 	}
-	return status + "\n" + helpStyle.Render(fit(help, m.width))
+	return status + "\n" + m.helpLine(help)
 }

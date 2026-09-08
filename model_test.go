@@ -5,8 +5,14 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/require"
 )
+
+func lastLine(view string) string {
+	lines := strings.Split(view, "\n")
+	return lines[len(lines)-1]
+}
 
 func key(k string) tea.KeyMsg {
 	switch k {
@@ -879,6 +885,59 @@ func TestModel(t *testing.T) {
 			press(m, "h")
 
 			require.Len(t, m.rows, 1)
+		})
+	})
+
+	t.Run("version", func(t *testing.T) {
+		t.Run("sits in the bottom-right corner", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			m := openOn(t, tm, "work")
+
+			last := lastLine(m.View())
+
+			require.True(t, strings.HasSuffix(last, version), "corner reads %q", last)
+			require.Equal(t, m.width-1, lipgloss.Width(last))
+		})
+
+		t.Run("stays in the corner while the full help is open", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			m := openOn(t, tm, "work")
+
+			press(m, "?")
+
+			require.True(t, strings.HasSuffix(lastLine(m.View()), version))
+		})
+
+		t.Run("stays in the corner over the layout of a window", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			m := openOn(t, tm, "work")
+
+			at(t, m, windowID(t, tm, "work", "edit"))
+			press(m, "L")
+
+			require.True(t, strings.HasSuffix(lastLine(m.View()), version))
+		})
+
+		t.Run("gives way to the help rather than wrapping it", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			m := openOn(t, tm, "work")
+			m.width = 40
+
+			last := lastLine(m.View())
+
+			require.True(t, strings.HasSuffix(last, version), "corner reads %q", last)
+			require.Equal(t, m.width-1, lipgloss.Width(last))
+		})
+	})
+
+	t.Run("help", func(t *testing.T) {
+		t.Run("the tree keeps room for the help it opens", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			m := openOn(t, tm, "work")
+
+			press(m, "?")
+
+			require.LessOrEqual(t, len(strings.Split(m.View(), "\n")), m.height)
 		})
 	})
 }

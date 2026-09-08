@@ -118,6 +118,10 @@ or no network, it builds from the source tpm already cloned, which needs a Go
 toolchain. Either way the result lands in `bin/tmux-arrange`, and what happened
 is written to `install.log` beside it.
 
+The version the binary was built at sits in the bottom-right corner of the
+popup, so an install or an update can be told apart from the one before it. A
+binary built by hand rather than from a release says `dev`.
+
 Requires tmux 3.2 or newer, for `display-popup`.
 
 ## Options

@@ -292,7 +292,7 @@ func textStyle(r row, style lipgloss.Style) lipgloss.Style {
 func (m *model) footer() string {
 	if m.mode == confirming {
 		return sessionStyle.Render("close "+describe(m.doomed)+"?") + "\n" +
-			helpStyle.Render("y  close    any other key  keep it")
+			m.helpLine("y  close    any other key  keep it")
 	}
 	if m.mode != browsing {
 		prompt := "new session name"
@@ -300,7 +300,7 @@ func (m *model) footer() string {
 			prompt = "rename to"
 		}
 		return sessionStyle.Render(prompt+": ") + m.input.View() + "\n" +
-			helpStyle.Render("enter  confirm    esc  cancel")
+			m.helpLine("enter  confirm    esc  cancel")
 	}
 	status := ""
 	switch m.tone {
@@ -312,9 +312,23 @@ func (m *model) footer() string {
 		status = errorStyle.Render(fit("✗ "+m.status, m.width))
 	}
 	if m.help {
-		return status + "\n\n" + helpStyle.Render(keyHelp(m.hereName()))
+		return status + "\n\n" + m.helpLine(keyHelp(m.hereName()))
 	}
-	return status + "\n" + helpStyle.Render(fit(shortHelp, m.width))
+	return status + "\n" + m.helpLine(shortHelp)
+}
+
+// helpLine is the bottom line of the screen: the help it offers, with the
+// version in the corner. Help given as a block of lines keeps the version on
+// the last of them, which is the only line the corner belongs to.
+func (m *model) helpLine(help string) string {
+	lines := strings.Split(help, "\n")
+	last := len(lines) - 1
+	lines[last] = fit(lines[last], m.width-lipgloss.Width(version)-2)
+	corner := helpStyle.Render(lines[last]) + m.gap(lines[last], version) + helpStyle.Render(version)
+	if last == 0 {
+		return corner
+	}
+	return helpStyle.Render(strings.Join(lines[:last], "\n")) + "\n" + corner
 }
 
 const shortHelp = "j k move   x cut   d close   r rename   L layout   p P paste   enter go   ? keys"
