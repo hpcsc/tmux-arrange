@@ -557,6 +557,23 @@ func TestModel(t *testing.T) {
 			require.NotEmpty(t, m.current().pane.command)
 		})
 
+		t.Run("r on a pane follows the tmux it is run on", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+			_, err := tm.run("split-window", "-d", "-t", "=work:edit")
+			require.NoError(t, err)
+			m := openOn(t, tm, "work")
+			openPanes(t, m, tm, "work", "edit", 0)
+
+			press(m, "r")
+
+			if knowsSetTitle(t, tm) {
+				require.Equal(t, renaming, m.mode)
+				return
+			}
+			require.Equal(t, browsing, m.mode)
+			require.Contains(t, m.status, "tmux 3.5")
+		})
+
 		t.Run("a pane is left unnamed where tmux cannot hold the name", func(t *testing.T) {
 			tm := server(t, []string{"work", "edit"})
 			_, err := tm.run("split-window", "-d", "-t", "=work:edit")

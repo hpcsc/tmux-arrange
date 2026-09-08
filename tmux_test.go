@@ -11,11 +11,24 @@ import (
 
 // server starts a throwaway tmux server holding one session per name, each with
 // the given windows, and returns a client bound to it.
+// knowsSetTitle says whether tmux has allow-set-title, by the other road to the
+// one holdsTitles takes: an unknown option makes show-options fail, where the
+// format holdsTitles reads only comes back empty. The tests ask this rather
+// than the code under test, so a probe that answers wrongly cannot agree with
+// itself into a green run.
+func knowsSetTitle(t *testing.T, tm tmux) bool {
+	t.Helper()
+	tree, err := tm.tree()
+	require.NoError(t, err)
+	_, err = tm.run("show-options", "-p", "-t", tree[0].windows[0].panes[0].id, "allow-set-title")
+	return err == nil
+}
+
 // needsPaneNames skips a test that names a pane where tmux cannot hold the name.
 // allow-set-title arrived in 3.5, and Ubuntu still ships 3.4.
 func needsPaneNames(t *testing.T, tm tmux) {
 	t.Helper()
-	if !tm.holdsTitles() {
+	if !knowsSetTitle(t, tm) {
 		t.Skip("this tmux has no allow-set-title; naming a pane needs 3.5")
 	}
 }
@@ -211,6 +224,14 @@ func TestTmux(t *testing.T) {
 
 		t.Run("an empty server yields no sessions", func(t *testing.T) {
 			require.Empty(t, parseTree(""))
+		})
+	})
+
+	t.Run("holding a title", func(t *testing.T) {
+		t.Run("reads the option tmux answers for, not one it does not know", func(t *testing.T) {
+			tm := server(t, []string{"work", "edit"})
+
+			require.Equal(t, knowsSetTitle(t, tm), tm.holdsTitles())
 		})
 	})
 
